@@ -43,7 +43,10 @@
 #include <ArduinoJson.h>                            // Libreria para manejo de archivo en formato json
 #include <EthernetClient.h>
 #include <Ethernet.h>
-#include <LiquidCrystal_I2C.h>                      //Librería para el uso de la pantalla LCD
+#include <LiquidCrystal_I2C.h>  
+#include <EthernetUdp.h>
+#include <NTPClient.h>
+#include <TimeLib.h>                    
 
 // Define los Chipselect para SPI del ethernet - CSE - y para el de la Mem SD - CS -
 #define CSE   3
@@ -120,8 +123,8 @@
 #define cmd_rmem         "RMEM"                           // Muestra (lista) y da lectura de los archivos contenidos en la MEMORIA SD
 #define cmd_dfil         "FILE"                           // Volcado de archivos, muestra la información contenida del archivo por comando #DFIL"archivo.ext"                                                             // (SIN COMILLAS Y MUESTRA LOS ARCHIVOS CONTENIDOS EN LA RAIZ del sistema                                     
 #define cmd_envioWebPost  "SWEB"   
-#define cmd_obtenNSUT     "NSUT"                          // Devuelve numero de serie de la unidad de Telemetría
-
+#define cmd_obtenNSUT     "NSUT"  
+#define cmd_ntpTime       "NTPT"                        // Obtiene el tiempo y fecha de un servidor NTF. 
 // defines of the screens to show for case 
 #define SCREEN_LETRERO  0
 #define SCREEN_VOLUMEN  1
@@ -138,6 +141,8 @@ byte outCount;
 char outBuf[128];
 EthernetClient client;
 EthernetClient dclient;
+// EthernetUDP    clientNTP;
+// NTPClient timeClient(clientNTP,"pool.ntp.org"); //////Protocolo de NTP
 bool networkConnected = false;
 
 //Variables globales
@@ -190,10 +195,10 @@ String inputString = "", content="";         // a string to hold incoming data
 boolean stringComplete = false, modbusMsgApp = false;  // whether the string is complete
 String commandString = "", cnc_fecha="cnc_fecha", cnc_hour="cnc_hour", cnc_flow="", cnc_vol="", error = "000";
 uint8_t  type, counter = 1;
-uint16_t hh=0, mm=0, ss=0, AA=0, MM=0, DD=0, controlC = 0;
+uint16_t hh=0, mm=0, ss=0, AA=0, MM=0, DD=0, controlC = 0, hhNTP=0, mmNTP=0, ssNTP=0, AANTP= 0, MMNTP=0, DDNTP=0;
 float totalVol = 0, flowRate = 0, tVolC=0, fRateC=0;
 
-//
+// 
 int x = 16,y = 0, x1=16, y1 = 0, RET = 200, i, z, tiempo; 
 unsigned long previousMillisTiempo = 0;
 unsigned long previousMillisScreen = 0;  
@@ -290,6 +295,7 @@ void asciiFTP(void);
 void storFTP(void);
 void salirFTP(void);
 String macEtheString(void);
+void obtenNTP(void);
 
 StaticJsonDocument<768> JsonDoc;  //almacenar Doc Json 768 bytes en la pila
 
@@ -1041,6 +1047,15 @@ void opciones() {
     }
     else if(commandString.equals(cmd_envioWebPost))     {conf.macAddres = macEthernet(false); envioWebPost(); }
     else if(commandString.equals(cmd_obtenNSUT))     { obtenNSUT(true); }
+    else  if (commandString.equals(cmd_ntpTime))    {obtenNTP();}
+    {
+      /* code */
+    }
+    
+    {
+      /* code */
+    }
+    
     inputString = "";
   } 
 }
@@ -2189,8 +2204,8 @@ void LOGO(unsigned int offset, unsigned int row)
   lcd.createChar(8, image95);
  
   MARCO();
-  lcd.setCursor(3, 1);
-  lcd.print("SWPLUS ETH2.3.1");
+  lcd.setCursor(2, 1);
+  lcd.print("SWPLUS ETH 2.3.1");
   lcd.setCursor(5, 2);
   lcd.print("TECNOLOGIAS");
 }
@@ -2394,9 +2409,11 @@ void MARCO(void){
 
 void setup() 
 {
+  
   Serial.begin(115200);           // Inicia comunicacion Serial 115200 / 8N1 con la aplicacion INFOPRO
   Wire.begin();                 // Inicia comunicacion I2C para SD Card
-  rtc.begin();                  // Iniciar Reloj tiempo real
+  rtc.begin(); 
+  // timeClient.begin();                 // Iniciar Reloj tiempo real
   pinMode(CSE, OUTPUT);
   pinMode(CS, OUTPUT);
   digitalWrite(CSE,LOW);
@@ -2425,7 +2442,7 @@ void setup()
     lcd.clear();
     LOGO(5,2);
   }
-
+  
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2435,7 +2452,9 @@ void setup()
 
 void loop() 
 {
-  
+  // timeClient.update();
+  // Serial.println(timeClient.getFormattedTime());
+  delay(1000);
   DateTime now = rtc.now();
   AA = now.year();
   MM = now.month();
@@ -2458,6 +2477,11 @@ void loop()
   }
 
   opciones(); 
+  if (hh == 18 and mm == 30 and ss == 10)
+  {
+    obtenNTP();
+  }
+  
 
   if( ( hh == conf.hhEnvio and mm == conf.mmEnvio and (ss%30 == 0)) )
   { 
@@ -2507,4 +2531,51 @@ void loop()
         }
       }     
   }
+}
+// Funciones para adquirir la hora y la fecha de un servido web
+void obtenNTP ()
+{
+int zonaHoraria = -6*3600;
+//setTimeOffset(-6 * 3600);
+Serial.println("Conectando a un Server NTP ... ... ...");
+EthernetUDP clientNTP;
+NTPClient timeClient(clientNTP,"1.mx.pool.ntp.org"); //////Protocolo de NTP 1-1.mx.pool.ntp.org, 2-3.north-america.pool.ntp.org 3-0.north-america.pool.ntp.org
+clientNTP.begin(8888);   
+timeClient.begin();              // Iniciar Reloj tiempo real
+timeClient.update(); 
+timeClient.isTimeSet();
+if(!timeClient.isTimeSet())
+{
+  Serial.println("Error en la conexión NTP, Dispisitivo sin RED");
+}
+else
+{
+unsigned long formato = timeClient.getEpochTime();
+//Serial.println(timeClient.getFormattedTime());
+//Serial.println(timeClient.getDay());
+//Serial.println(timeClient.getHours() - 6);
+//Serial.println(timeClient.getMinutes());
+//Serial.println(timeClient.getSeconds());
+//Serial.println(timeClient.getEpochTime());
+//Serial.println(timeClient.getDay());
+setTime(formato + zonaHoraria);
+//Serial.println(formato);
+String formattedDateTime = String(year()) + "-" + month() + "-" + day() + " " + hour() + ":" + minute() + ":" + second();
+Serial.println("Fecha y hora actual: " + formattedDateTime);
+AANTP = year();
+MMNTP = month();
+DDNTP = day();
+hhNTP = hour();
+mmNTP = minute();
+ssNTP = second();
+Serial.println("Conexion con exito");
+Serial.println("FECHA Y HORA DEL SERVIDOR NTP");
+Serial.println(String(AANTP) + "-" + String(MMNTP) + "-" + String(DDNTP) + "  " + String(hhNTP) + ":" + String(mmNTP) + ":" + String(ssNTP));
+Serial.println("Modificando Reloj con FECHA Y HORA tomada del servidor NTP");
+AA = AANTP, MM = MMNTP, DD = DDNTP, hh = hhNTP, mm = mmNTP, ss = ssNTP;
+rtc.adjust(DateTime(AA, MM, DD, hh, mm, ss));
+Serial.println(String(AA) + "-" + String(MM) + "-" + String(DD) + "  " + String(hh) + ":" + String(mm) + ":" + String(ss));
+}
+delay(1000);
+timeClient.end();
 }
